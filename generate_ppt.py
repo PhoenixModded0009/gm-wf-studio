@@ -83,8 +83,7 @@ def build_presentation(config, slides, output_filename="output.pptx"):
     try:
         prs = Presentation(template_file)
     except Exception as e:
-        print(f"Error: Could not load {template_file}. Make sure it exists in the folder.")
-        sys.exit(1)
+        raise ValueError(f"Could not load '{template_file}'. Please ensure you uploaded both 'light_template.pptx' and 'dark_template.pptx' to your GitHub repository.")
 
     # 2. Define Layout Mapping to Standard PowerPoint Slide Masters
     layout_map = {
@@ -162,3 +161,4 @@ if __name__ == "__main__":
     
     out_file = md_file.replace('.md', '.pptx')
     build_presentation(config, slides, out_file)
+
