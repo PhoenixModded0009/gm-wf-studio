@@ -1,36 +1,33 @@
 import os
 import sys
+import re
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN
 
 def parse_markdown(filepath):
-    """Parses the Markdown file into Frontmatter and Slides."""
+    """Parses the Markdown file and safely captures ALL text."""
     with open(filepath, 'r', encoding='utf-8') as file:
         content = file.read()
 
-    # Split frontmatter and body
     parts = content.split('---')
     if len(parts) < 3:
-        print("Error: Could not find YAML frontmatter enclosed in '---'")
-        sys.exit(1)
-        
-    frontmatter_text = parts[1].strip()
-    body_text = parts[2].strip()
+        frontmatter_text = ""
+        body_text = content
+        config = {'Theme': 'Light', 'Mode': 'Standard'}
+    else:
+        frontmatter_text = parts[1].strip()
+        body_text = parts[2].strip()
+        config = {}
+        for line in frontmatter_text.split('\n'):
+            if ':' in line:
+                key, val = line.split(':', 1)
+                config[key.strip()] = val.strip()
 
-    # Parse Frontmatter variables
-    config = {}
-    for line in frontmatter_text.split('\n'):
-        if ':' in line:
-            key, val = line.split(':', 1)
-            config[key.strip()] = val.strip()
-
-    # Parse Slides (Split by '# ' which denotes a new slide title)
-    raw_slides = body_text.split('\n# ')
-    
-    # Fix the first slide missing the '#' due to the split
-    if raw_slides[0].startswith('# '):
-        raw_slides[0] = raw_slides[0][2:]
+    # Safely split slides even if AI uses ## or ###
+    raw_slides = re.split(r'\n#+\s+', '\n' + body_text)
+    if raw_slides and not raw_slides[0].strip():
+        raw_slides.pop(0)
     
     slides = []
     for raw_slide in raw_slides:
@@ -38,11 +35,11 @@ def parse_markdown(filepath):
             continue
             
         lines = raw_slide.split('\n')
-        title = lines[0].strip()
+        title = lines[0].strip().replace('**', '') # Clean bolding from titles
         
         slide_data = {
             'title': title,
-            'layout': 'Single', # Default
+            'layout': 'Single', 
             'footer': '',
             'bullets': [],
             'placeholder': '',
@@ -50,115 +47,97 @@ def parse_markdown(filepath):
         }
 
         for line in lines[1:]:
-            # Match Layout
-            if line.startswith('Layout:'):
+            line_s = line.strip()
+            if not line_s:
+                continue
+                
+            if line_s.startswith('Layout:'):
                 slide_data['layout'] = line.split(':', 1)[1].strip()
-            # Match Footer
-            elif line.startswith('Footer:'):
+            elif line_s.startswith('Footer:'):
                 slide_data['footer'] = line.split(':', 1)[1].strip()
-            # Match Notes
-            elif line.startswith('> Notes:'):
+            elif line_s.startswith('> Notes:'):
                 slide_data['notes'] = line.split(':', 1)[1].strip()
-            # Match Placeholders
-            elif line.startswith('[PLACEHOLDER:'):
-                slide_data['placeholder'] = line.strip()
-            # Match Bullets (handles indentation for sub-bullets)
-            elif line.lstrip().startswith('- '):
+            elif line_s.startswith('[PLACEHOLDER') or line_s.startswith('[Placeholder'):
+                slide_data['placeholder'] = line_s
+            elif line_s.startswith('---'):
+                continue 
+            else:
+                # NEW: Capture ALL text, even if AI forgets the bullet symbol
                 indent_level = len(line) - len(line.lstrip())
-                level = 0 if indent_level == 0 else 1 # Simple 2-level nesting
-                text = line.lstrip()[2:].strip()
-                slide_data['bullets'].append({'level': level, 'text': text})
+                level = 0 if indent_level < 3 else 1 
+                
+                # Strip out any weird markdown formatting
+                clean_text = re.sub(r'^[-*+]\s+', '', line.lstrip())
+                clean_text = re.sub(r'^\d+\.\s+', '', clean_text)
+                clean_text = clean_text.replace('**', '')
+                
+                if clean_text:
+                    slide_data['bullets'].append({'level': level, 'text': clean_text})
 
         slides.append(slide_data)
 
     return config, slides
 
 def build_presentation(config, slides, output_filename="output.pptx"):
-    """Builds the PowerPoint file using python-pptx."""
-    
-    # 1. Select Theme Template
+    """Builds the PowerPoint file and protects against corrupted templates."""
     theme = config.get('Theme', 'Light').lower()
     template_file = 'dark_template.pptx' if 'dark' in theme else 'light_template.pptx'
     
     try:
         prs = Presentation(template_file)
     except Exception as e:
-        raise ValueError(f"Could not load '{template_file}'. Please ensure you uploaded both 'light_template.pptx' and 'dark_template.pptx' to your GitHub repository.")
+        raise ValueError(f"CRITICAL ERROR: Could not open {template_file}. Ensure it is a valid PowerPoint file, not an empty document.")
 
-    # 2. Define Layout Mapping to Standard PowerPoint Slide Masters
     layout_map = {
-        'Title': 0,
-        'Single': 1,
-        'Data_Heavy': 1,
-        'Step_by_Step': 1,
-        'Divider': 2,
-        'Split': 3,
-        'Comparison': 3,
-        'PICO': 3,
-        'Vitals_Grid': 3,
-        'Algorithm': 5 
+        'Title': 0, 'Single': 1, 'Data_Heavy': 1, 'Step_by_Step': 1,
+        'Divider': 2, 'Split': 3, 'Comparison': 3, 'PICO': 3,
+        'Vitals_Grid': 3, 'Algorithm': 5 
     }
 
-    # 3. Generate Slides
     for slide_data in slides:
         layout_name = slide_data['layout']
-        layout_idx = layout_map.get(layout_name, 1) # Fallback if typo occurs
+        layout_idx = layout_map.get(layout_name, 1) 
         
-        slide_layout = prs.slide_layouts[layout_idx]
-        slide = prs.slides.add_slide(slide_layout)
+        try:
+            slide_layout = prs.slide_layouts[layout_idx]
+            slide = prs.slides.add_slide(slide_layout)
+        except IndexError:
+            # Fallback if your template is missing layouts
+            slide = prs.slides.add_slide(prs.slide_layouts[1])
 
-        # Add Title
         if slide.shapes.title:
             slide.shapes.title.text = slide_data['title']
 
-        # Add Bullets
         if slide_data['bullets'] and layout_idx in [1, 3]: 
-            body_shape = slide.placeholders[1]
-            tf = body_shape.text_frame
-            tf.clear() 
-            
-            for i, bullet in enumerate(slide_data['bullets']):
-                p = tf.add_paragraph() if i > 0 else tf.paragraphs[0]
-                p.text = bullet['text']
-                p.level = bullet['level']
+            try:
+                body_shape = slide.placeholders[1]
+                tf = body_shape.text_frame
+                tf.clear() 
+                
+                for i, bullet in enumerate(slide_data['bullets']):
+                    p = tf.add_paragraph() if i > 0 else tf.paragraphs[0]
+                    p.text = bullet['text']
+                    p.level = bullet['level']
+            except (IndexError, KeyError):
+                pass # Ignores the error if the slide master is missing the text box
 
-        # Add Footer (Dynamic Citation)
         if slide_data['footer']:
-            left = Inches(5.5)
-            top = Inches(6.8)
-            width = Inches(4)
-            height = Inches(0.5)
+            left, top, width, height = Inches(5.5), Inches(6.8), Inches(4), Inches(0.5)
             txBox = slide.shapes.add_textbox(left, top, width, height)
-            tf = txBox.text_frame
-            p = tf.paragraphs[0]
+            p = txBox.text_frame.paragraphs[0]
             p.text = slide_data['footer']
             p.font.size = Pt(12)
             p.font.italic = True
             p.alignment = PP_ALIGN.RIGHT
 
-        # Add Speaker Notes
         if slide_data['notes']:
-            notes_slide = slide.notes_slide
-            text_frame = notes_slide.notes_text_frame
-            text_frame.text = slide_data['notes']
+            slide.notes_slide.notes_text_frame.text = slide_data['notes']
 
-        # Console Alert for Image Placeholders
-        if slide_data['placeholder']:
-            print(f"Reminder: Drag and drop an asset into slide '{slide_data['title']}' for {slide_data['placeholder']}")
-
-    # 4. Save the File
     prs.save(output_filename)
-    print(f"\n✅ Success! Presentation saved as {output_filename}")
-    print(f"Mode Used: {config.get('Mode', 'Standard')}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python generate_ppt.py <your_markdown_file.md>")
         sys.exit(1)
-        
     md_file = sys.argv[1]
     config, slides = parse_markdown(md_file)
-    
-    out_file = md_file.replace('.md', '.pptx')
-    build_presentation(config, slides, out_file)
-
+    build_presentation(config, slides, md_file.replace('.md', '.pptx'))
