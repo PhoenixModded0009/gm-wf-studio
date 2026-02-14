@@ -1,106 +1,93 @@
-import streamlit as st
-import google.generativeai as genai
 import os
-from generate_ppt import parse_markdown, build_presentation 
+import sys
+import re
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.enum.text import PP_ALIGN
+from pptx.dml.color import RGBColor
 
-# --- UI Setup ---
-st.set_page_config(page_title="GM-WF Studio", page_icon="🩺", layout="wide")
-st.title("🩺 GM-WF Studio v4.1")
-st.markdown("Automated Pediatric Presentation Engine")
+def parse_markdown(filepath):
+    """Parses Markdown and captures all text/formatting."""
+    with open(filepath, 'r', encoding='utf-8') as file:
+        content = file.read()
 
-# --- Control Panel (Sidebar) ---
-with st.sidebar:
-    st.header("⚙️ Settings")
-    density = st.selectbox("Density", ["Standard", "Minimalist", "Detailed"])
-    audience = st.selectbox("Audience", ["Interns", "Co-Residents", "Attendings", "Thesis Committee"])
-    slide_limit = st.slider("Max Slides", 3, 25, 10)
-    mode = st.selectbox("Mode", ["Research_Update", "Theory_Topic", "Case_Presentation", "Practical_Approach", "Journal_Club", "Morbidity_Mortality"])
-    theme = st.radio("Theme", ["Light", "Dark"])
-    
-# --- Main Input ---
-raw_notes = st.text_area("Paste your raw clinical brain dump here:", height=250)
-
-if st.button("Generate Presentation", type="primary"):
-    if 'ppt_data' in st.session_state:
-        del st.session_state['ppt_data']
-        
-    if not raw_notes:
-        st.error("Please enter your clinical notes first.")
+    parts = content.split('---')
+    if len(parts) < 3:
+        config = {'Theme': 'Light', 'Mode': 'Standard'}
+        body_text = content
     else:
-        with st.spinner("🧠 AI is structuring your clinical logic..."):
-            try:
-                # 1. Authenticate with Google Gemini
-                api_key = st.secrets["GEMINI_API_KEY"]
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-2.5-flash')
-                
-                # 2. Construct the Master Prompt
-                prompt = f"""
-                Act as an Expert Medical Presentation Architect. Convert these notes to a strict Markdown script for a PowerPoint engine.
-                
-                CONTROL PANEL:
-                Density: {density} (Strictly enforce bullet limits based on this: Minimalist=3, Standard=5, Detailed=7 nested).
-                Audience: {audience}
-                Slide Limit: {slide_limit}
-                
-                CRITICAL RULES:
-                1. Start with this exact YAML block:
-                ---
-                Ratio: 16:9
-                Theme: {theme}
-                Accent: PICU Blue
-                Mode: {mode}
-                ---
-                2. Use the exact slide syntax:
-                # Slide Title
-                Layout: [Title, Single, Split, Comparison, Algorithm, Vitals_Grid, PICO, Data_Heavy, Step_by_Step, Divider]
-                Footer: [Citation or blank]
-                
-                - Bullet 1
-                
-                [PLACEHOLDER: description]
-                > Notes: [Speaker notes]
-                
-                RAW NOTES:
-                {raw_notes}
-                """
-                
-                # 3. Get AI Response
-                response = model.generate_content(prompt)
-                markdown_output = response.text
-                
-                # 4. Clean Markdown output (Strip AI code blocks)
-                markdown_output = markdown_output.replace("```markdown", "").replace("```", "").strip()
-                
-                # 5. Save Temp File & Run Your Engine
-                with open("temp.md", "w", encoding="utf-8") as f:
-                    f.write(markdown_output)
-                    
-                config, slides = parse_markdown("temp.md")
-                output_file = "final_presentation.pptx"
-                build_presentation(config, slides, output_file)
-                
-                # 6. Save output to session_state so it survives button clicks
-                with open(output_file, "rb") as file:
-                    st.session_state['ppt_data'] = file.read()
-                
-                st.success("✅ Presentation built successfully!")
-                
-                # Cleanup temp files
-                os.remove("temp.md")
-                os.remove(output_file)
-                
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+        frontmatter_text = parts[1].strip()
+        body_text = parts[2].strip()
+        config = {line.split(':', 1)[0].strip(): line.split(':', 1)[1].strip() 
+                  for line in frontmatter_text.split('\n') if ':' in line}
 
-# --- Persistent Download Button ---
-# This sits outside the main button logic so it never disappears prematurely
-if 'ppt_data' in st.session_state:
-    st.download_button(
-        label="📥 Download PowerPoint File",
-        data=st.session_state['ppt_data'],
-        file_name="GM_WF_Presentation.pptx",
-        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    )
+    raw_slides = re.split(r'\n#+\s+', '\n' + body_text)
+    if raw_slides and not raw_slides[0].strip():
+        raw_slides.pop(0)
+    
+    slides = []
+    for raw_slide in raw_slides:
+        if not raw_slide.strip(): continue
+        lines = raw_slide.split('\n')
+        slide_data = {
+            'title': lines[0].strip().replace('**', ''),
+            'layout': 'Single', 'footer': '', 'bullets': [], 'placeholder': '', 'notes': ''
+        }
+        for line in lines[1:]:
+            line_s = line.strip()
+            if not line_s: continue
+            if line_s.startswith('Layout:'): slide_data['layout'] = line.split(':', 1)[1].strip()
+            elif line_s.startswith('Footer:'): slide_data['footer'] = line.split(':', 1)[1].strip()
+            elif line_s.startswith('> Notes:'): slide_data['notes'] = line.split(':', 1)[1].strip()
+            elif line_s.startswith('[PLACEHOLDER'): slide_data['placeholder'] = line_s
+            else:
+                level = 0 if len(line) - len(line.lstrip()) < 3 else 1
+                clean_text = re.sub(r'^[-*+]\s+|^d+\.\s+', '', line.lstrip()).replace('**', '')
+                if clean_text: slide_data['bullets'].append({'level': level, 'text': clean_text})
+        slides.append(slide_data)
+    return config, slides
 
+def build_presentation(config, slides, output_filename="output.pptx"):
+    """Builds PPTX with dynamic themes and red-alert placeholders."""
+    theme = config.get('Theme', 'Light').lower()
+    # Flexibility: Look for 'blue_template.pptx', 'red_template.pptx', etc.
+    template_file = f"{theme}_template.pptx" if os.path.exists(f"{theme}_template.pptx") else 'light_template.pptx'
+    
+    try:
+        prs = Presentation(template_file)
+    except:
+        raise ValueError(f"Template '{template_file}' not found. Upload it to GitHub.")
 
+    layout_map = {'Title': 0, 'Single': 1, 'Divider': 2, 'Split': 3, 'Comparison': 3, 'Algorithm': 5}
+
+    for slide_data in slides:
+        idx = layout_map.get(slide_data['layout'], 1)
+        slide = prs.slides.add_slide(prs.slide_layouts[idx])
+        
+        if slide.shapes.title:
+            slide.shapes.title.text = slide_data['title']
+
+        if slide_data['bullets'] and idx in [1, 3]:
+            tf = slide.placeholders[1].text_frame
+            tf.clear()
+            for b in slide_data['bullets']:
+                p = tf.add_paragraph()
+                p.text, p.level = b['text'], b['level']
+
+        # THE RED ALERT STAMP
+        if slide_data['placeholder']:
+            box = slide.shapes.add_textbox(Inches(1), Inches(3.5), Inches(8), Inches(1))
+            p = box.text_frame.paragraphs[0]
+            p.text = f"🚨 ACTION: INSERT {slide_data['placeholder'].upper()} 🚨"
+            p.font.size, p.font.bold = Pt(24), True
+            p.font.color.rgb = RGBColor(255, 0, 0)
+            p.alignment = PP_ALIGN.CENTER
+
+        if slide_data['footer']:
+            tx = slide.shapes.add_textbox(Inches(5.5), Inches(6.8), Inches(4), Inches(0.5))
+            tx.text_frame.text = slide_data['footer']
+        
+        if slide_data['notes']:
+            slide.notes_slide.notes_text_frame.text = slide_data['notes']
+
+    prs.save(output_filename)
