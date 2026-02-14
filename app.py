@@ -22,9 +22,9 @@ raw_notes = st.text_area("Paste your raw clinical brain dump here:", height=250)
 
 if st.button("Generate Presentation", type="primary"):
     if 'ppt_data' in st.session_state:
-        del st.session_state['ppt_data']       
+        del st.session_state['ppt_data']
+        
     if not raw_notes:
-        st.error("Please enter your clinical notes first.")if not raw_notes:
         st.error("Please enter your clinical notes first.")
     else:
         with st.spinner("🧠 AI is structuring your clinical logic..."):
@@ -102,4 +102,5 @@ if 'ppt_data' in st.session_state:
         file_name="GM_WF_Presentation.pptx",
         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
     )
+
 
