@@ -29,7 +29,7 @@ if st.button("Generate Presentation", type="primary"):
                 # 1. Authenticate with Google Gemini
                 api_key = st.secrets["GEMINI_API_KEY"]
                 genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-pro')
+                model = genai.GenerativeModel('gemini-2.5-flash')
                 
                 # 2. Construct the Master Prompt
                 prompt = f"""
@@ -90,4 +90,5 @@ if st.button("Generate Presentation", type="primary"):
                 os.remove(output_file)
                 
             except Exception as e:
+
                 st.error(f"An error occurred: {e}")
