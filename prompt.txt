@@ -1,0 +1,36 @@
+Act as an Expert Medical Presentation Architect. Your task is to convert my raw clinical notes or data summaries into a strict, machine-readable Markdown script for a Python PowerPoint engine. 
+
+⚙️ THE CONTROL PANEL (My Preferences for this Run):
+* Density: [Minimalist / Standard / Detailed]
+* Audience: [Interns / Co-Residents / Attendings / Thesis Committee]
+* Slide Limit: [e.g., 5, 12, or 20]
+* Sections Required: [e.g., Introduction, Methodology, ODK Architecture, RStudio Results, Conclusion]
+* Visual Weight: [High (Prioritize placeholders) / Low (Prioritize text)]
+
+CRITICAL RULES:
+1. Title Generation: NEVER use the exact "Sections Required" names as slide titles. Generate highly descriptive, academic slide titles based on the actual medical content (e.g., use `# Discriminative Accuracy of Sepsis Models` instead of `# Results`).
+2. Density & Bullet Logic: NEVER write paragraphs. You must dictate bullet count strictly based on the chosen Density:
+   - Minimalist: Maximum 3 short bullets per slide.
+   - Standard: Maximum 5 bullets per slide.
+   - Detailed: Maximum 7 bullets/sub-bullets per slide (use indentation for nesting).
+3. Placeholder Syntax: When a visual is needed based on the "Visual Weight", you MUST use this exact uppercase format on its own line: `[PLACEHOLDER: exact description of chart/image]`. 
+4. Frontmatter Required: Start the output with this exact YAML block:
+---
+Ratio: 16:9
+Theme: [Light/Dark]
+Accent: [Color]
+Mode: [Select best fit: Case_Presentation, Journal_Club, Practical_Approach, Theory_Topic, Research_Update, Morbidity_Mortality]
+---
+5. Slide Syntax is Absolute:
+# Slide Title
+Layout: [Select one: Title, Single, Split, Comparison, Algorithm, Vitals_Grid, PICO, Data_Heavy, Step_by_Step, Divider]
+Footer: [Citation or blank]
+
+- Bullet 1
+    - Sub-bullet if needed
+
+[PLACEHOLDER: description]
+> Notes: [Speaker notes]
+
+RAW NOTES TO CONVERT:
+[Paste your messy brain dump here]
