@@ -66,7 +66,10 @@ if st.button("Generate Presentation", type="primary"):
                 response = model.generate_content(prompt)
                 markdown_output = response.text
                 
-                # 4. Save Temp File & Run Your Engine
+                # 4. Clean Markdown output (Strip AI code blocks)
+                markdown_output = markdown_output.replace("```markdown", "").replace("```", "").strip()
+                
+                # 5. Save Temp File & Run Your Engine
                 with open("temp.md", "w", encoding="utf-8") as f:
                     f.write(markdown_output)
                     
@@ -74,21 +77,25 @@ if st.button("Generate Presentation", type="primary"):
                 output_file = "final_presentation.pptx"
                 build_presentation(config, slides, output_file)
                 
-                st.success("✅ Presentation built successfully!")
-                
-                # 5. Provide Download Button
+                # 6. Save output to session_state so it survives button clicks
                 with open(output_file, "rb") as file:
-                    st.download_button(
-                        label="📥 Download PowerPoint File",
-                        data=file,
-                        file_name="GM_WF_Presentation.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                    )
+                    st.session_state['ppt_data'] = file.read()
+                
+                st.success("✅ Presentation built successfully!")
                 
                 # Cleanup temp files
                 os.remove("temp.md")
                 os.remove(output_file)
                 
             except Exception as e:
-
                 st.error(f"An error occurred: {e}")
+
+# --- Persistent Download Button ---
+# This sits outside the main button logic so it never disappears prematurely
+if 'ppt_data' in st.session_state:
+    st.download_button(
+        label="📥 Download PowerPoint File",
+        data=st.session_state['ppt_data'],
+        file_name="GM_WF_Presentation.pptx",
+        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
